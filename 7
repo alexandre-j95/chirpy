@@ -1,41 +1,22 @@
 package main
+
 import (
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
-	"strings"
 	"sync/atomic"
-	"database/sql"
-	"os"
-	"github.com/joho/godotenv"
-	"github.com/alexandre-j95/chirpy/internal/database"
- 	_ "github.com/lib/pq"
 )
-
-const maxChirpLength = 140
 
 type apiConfig struct {
 	fileserverHits atomic.Int32
-	DB *database.Queries
 }
 
 func main() {
-	godotenv.Load()
-	dbURL := os.Getenv("DB_URL")
-	db, err := sql.Open("postgres", dbURL)
-	if err != nil {
-		log.Fatal(err)
-	}
-	dbQueries := database.New(db)
-
 	const filepathRoot = "."
 	const port = "8080"
 
-	apiCfg := apiConfig{
-		fileserverHits: atomic.Int32{}, 
-		DB: dbQueries,
-	}
+	apiCfg := apiConfig{atomic.Int32{}}
 	serveMux := http.NewServeMux()
 
 	serveMux.Handle("/app/", apiCfg.middlewareMetricsInc(http.StripPrefix("/app/", http.FileServer(http.Dir(filepathRoot)))))
@@ -63,43 +44,27 @@ func handlerValidateChirp(w http.ResponseWriter, r *http.Request) {
 	params := parameters{}
 	err := decoder.Decode(&params)
 	if err != nil {
-		respondWithError(w, 500, fmt.Sprintf("Error decoding parameters %s", err))
+		respondWithError(w, 500, "Error decoding parameters: %s")
 		return
 	}
 
 	// check parameters for message length
-	if len(params.Body) > maxChirpLength {
-		respondWithError(w, 400, fmt.Sprintf("Chirp is too long. Max length: %d", maxChirpLength))
+	if len(params.Body) > 140 {
+		respondWithError(w, 400, "Chirp is too long")
 		return
 	}
-	// check and replace profanity
-	cleanBody := removeProfanity(params.Body)
 	type successResp struct {
-		CleanedBody string `json:"cleaned_body"`
+		Valid bool `json:"valid"`
 	}
-	respondWithJSON(w, 200, successResp{cleanBody})
-}
-
-func removeProfanity(text string) string{
-	badWordsMap := map[string]bool{
-		"kerfuffle": true,
-		"sharbert":  true,
-		"fornax":    true,
-	}	
-	words := strings.Split(text, " ")
-	for n, word := range words {
-		if badWordsMap[strings.ToLower(word)] {
-			words[n] = "****"
-		}
-	}
-	return strings.Join(words, " ")
+	respondWithJSON(w, 200, successResp{true})
 }
 
 func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	dat, err := json.Marshal(payload)
 	if err != nil {
-		respondWithError(w, 500, fmt.Sprintf("Error marshalling JSON: %s", err))
+		log.Printf("Error marshalling JSON: %s", err)
+		w.WriteHeader(400)
 		return
 	}
 	w.WriteHeader(code)
