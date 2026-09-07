@@ -68,6 +68,8 @@ func main() {
 	serveMux.HandleFunc("POST /admin/reset", apiCfg.handlerReset)
 	serveMux.HandleFunc("POST /api/users", apiCfg.handlerCreateUser)
 	serveMux.HandleFunc("POST /api/chirps", apiCfg.handlerCreateChirp)
+	serveMux.HandleFunc("GET /api/chirps", apiCfg.handlerGetChirps)
+	serveMux.HandleFunc("GET /api/chirps/{chirpID}", apiCfg.handlerGetChirpByID)
 
 	s := &http.Server{
 		Handler: serveMux,
@@ -76,6 +78,47 @@ func main() {
 
 	log.Printf("Serving files from %s on port: %s\n", filepathRoot, port)
 	log.Fatal(s.ListenAndServe())
+}
+
+func (cfg *apiConfig) handlerGetChirpByID(w  http.ResponseWriter, r *http.Request) {
+	chirpID, err := uuid.Parse(r.PathValue("chirpID"))
+	if err != nil {
+		respondWithError(w, 400, fmt.Sprintf("Error processing chirp ID: %s", err))
+		return
+	}
+	chirp, err := cfg.DB.GetChirpByID(r.Context(), chirpID)
+	if err != nil {
+		respondWithError(w, 404, fmt.Sprintf("Error retrieving chirp from server: %s", err))
+		return
+	}
+	chirpStruct := Chirp{
+		ID: chirp.ID,
+		CreatedAt: chirp.CreatedAt,
+		UpdatedAt: chirp.UpdatedAt,
+		Body: chirp.Body,
+		UserID: chirp.UserID,
+	}
+	respondWithJSON(w, 200, chirpStruct)
+}
+
+func (cfg *apiConfig) handlerGetChirps(w  http.ResponseWriter, r *http.Request) {
+	chirpArr, err := cfg.DB.GetChirps(r.Context())
+	if err != nil {
+		respondWithError(w, 500, fmt.Sprintf("Error retrieving chirps from server: %s", err))
+	}
+
+	chirpStructArr := []Chirp{}
+	for _, chirp := range chirpArr {
+		chirpStruct := Chirp{
+		ID: chirp.ID,
+		CreatedAt: chirp.CreatedAt,
+		UpdatedAt: chirp.UpdatedAt,
+		Body: chirp.Body,
+		UserID: chirp.UserID,
+	}
+		chirpStructArr = append(chirpStructArr, chirpStruct)
+	}
+	respondWithJSON(w, 200, chirpStructArr)
 }
 
 func (cfg *apiConfig) handlerCreateChirp(w  http.ResponseWriter, r *http.Request) {
@@ -100,7 +143,7 @@ func (cfg *apiConfig) handlerCreateChirp(w  http.ResponseWriter, r *http.Request
 	cleanBody := removeProfanity(params.Body)
 	chirp, err := cfg.DB.CreateChirp(r.Context(), database.CreateChirpParams{Body: cleanBody, UserID: params.UserID})
 	if err != nil {
-		respondWithError(w, 400, fmt.Sprintf("Error creating chirp: %s", err))
+		respondWithError(w, 500, fmt.Sprintf("Error creating chirp: %s", err))
 		return
 	}
 	chirpStruct := Chirp{
