@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/alexandre-j95/chirpy/internal/auth"
 	"github.com/alexandre-j95/chirpy/internal/database"
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
@@ -70,6 +71,7 @@ func main() {
 	serveMux.HandleFunc("POST /api/chirps", apiCfg.handlerCreateChirp)
 	serveMux.HandleFunc("GET /api/chirps", apiCfg.handlerGetChirps)
 	serveMux.HandleFunc("GET /api/chirps/{chirpID}", apiCfg.handlerGetChirpByID)
+	serveMux.HandleFunc("POST /api/login", apiCfg.handlerLogin)
 
 	s := &http.Server{
 		Handler: serveMux,
@@ -78,6 +80,39 @@ func main() {
 
 	log.Printf("Serving files from %s on port: %s\n", filepathRoot, port)
 	log.Fatal(s.ListenAndServe())
+}
+
+func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
+	// Decode json logic
+	type parameters struct {
+		Password string `json:"password"`
+		Email string `json:"email"`
+	}
+	decoder := json.NewDecoder(r.Body)
+	params := parameters{}
+	err := decoder.Decode(&params)
+	if err != nil {
+		respondWithError(w, 400, fmt.Sprintf("Error decoding parameters %s", err))
+		return
+	}
+	user, err := cfg.DB.GetUserByEmail(r.Context(), params.Email)
+	if err != nil {
+		respondWithError(w, 401, "Incorrect email or password")
+		return
+	}
+	match, err := auth.CheckPasswordHash(params.Password, user.HashedPassword)
+	if !match {
+		respondWithError(w, 401, "Incorrect email or password")
+		return
+	}
+
+	mappedUser := User{
+		ID: user.ID,
+		CreatedAt: user.CreatedAt,
+		UpdatedAt: user.UpdatedAt,
+		Email: user.Email,
+	}
+	respondWithJSON(w, 200, mappedUser)
 }
 
 func (cfg *apiConfig) handlerGetChirpByID(w  http.ResponseWriter, r *http.Request) {
@@ -160,6 +195,7 @@ func (cfg *apiConfig) handlerCreateChirp(w  http.ResponseWriter, r *http.Request
 func (cfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Request){
 	// Decode json logic
 	type parameters struct {
+		Password string `json:"password"`
 		Email string `json:"email"`
 	}
 	decoder := json.NewDecoder(r.Body)
@@ -170,8 +206,12 @@ func (cfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Request){
 		return
 	}
 
+	hashed_password, err := auth.HashPassword(params.Password)
+	if err != nil {
+		respondWithError(w, 500, fmt.Sprintf("Error: %s", err))
+	}
 	// Create User Struct
-	user, err := cfg.DB.CreateUser(r.Context(), params.Email)
+	user, err := cfg.DB.CreateUser(r.Context(), database.CreateUserParams{hashed_password, params.Email})
 	if err != nil {
 		respondWithError(w, 500, fmt.Sprintf("Error creating user: %s", err))
 		return
