@@ -24,6 +24,7 @@ type apiConfig struct {
 	fileserverHits atomic.Int32
 	DB *database.Queries
 	Platform string
+	jwtSecret string
 }
 
 type User struct {
@@ -44,6 +45,9 @@ type Chirp struct {
 func main() {
 	godotenv.Load()
 	dbURL := os.Getenv("DB_URL")
+	if dbURL == "" {
+		log.Fatal("DB_URL must be set")
+	}
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
 		log.Fatal(err)
@@ -51,6 +55,14 @@ func main() {
 	dbQueries := database.New(db)
 
 	platform := os.Getenv("PLATFORM")
+	if platform == "" {
+		log.Fatal("Platform must be set")
+	}
+
+	jwtSecret := os.Getenv("JWTSECRET")
+	if jwtSecret == "" {
+		log.Fatal("JWT Secret is not set")
+	}
 
 	const filepathRoot = "."
 	const port = "8080"
@@ -59,6 +71,7 @@ func main() {
 		fileserverHits: atomic.Int32{}, 
 		DB: dbQueries,
 		Platform: platform,
+		jwtSecret: jwtSecret,
 	}
 	serveMux := http.NewServeMux()
 
@@ -211,7 +224,7 @@ func (cfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Request){
 		respondWithError(w, 500, fmt.Sprintf("Error: %s", err))
 	}
 	// Create User Struct
-	user, err := cfg.DB.CreateUser(r.Context(), database.CreateUserParams{hashed_password, params.Email})
+	user, err := cfg.DB.CreateUser(r.Context(),database.CreateUserParams{HashedPassword: hashed_password, Email: params.Email})
 	if err != nil {
 		respondWithError(w, 500, fmt.Sprintf("Error creating user: %s", err))
 		return
