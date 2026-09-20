@@ -96,11 +96,17 @@ func main() {
 }
 
 func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
-	// Decode json logic
 	type parameters struct {
 		Password string `json:"password"`
 		Email string `json:"email"`
+		ExpiresInSeconds int `json:"expires_in_seconds"`
 	}
+	type response struct {
+		User
+		Token string `json:"token"`
+		RefreshToken string `json:"refresh_token"`
+	}
+
 	decoder := json.NewDecoder(r.Body)
 	params := parameters{}
 	err := decoder.Decode(&params)
@@ -108,24 +114,43 @@ func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, 400, fmt.Sprintf("Error decoding parameters %s", err))
 		return
 	}
+
 	user, err := cfg.DB.GetUserByEmail(r.Context(), params.Email)
 	if err != nil {
 		respondWithError(w, 401, "Incorrect email or password")
 		return
 	}
+
 	match, err := auth.CheckPasswordHash(params.Password, user.HashedPassword)
 	if !match {
 		respondWithError(w, 401, "Incorrect email or password")
 		return
 	}
 
-	mappedUser := User{
-		ID: user.ID,
-		CreatedAt: user.CreatedAt,
-		UpdatedAt: user.UpdatedAt,
-		Email: user.Email,
+	expirationTime := time.Hour
+	if params.ExpiresInSeconds > 0 && params.ExpiresInSeconds < 3600 {
+		expirationTime = time.Duration(params.ExpiresInSeconds) * time.Second
 	}
-	respondWithJSON(w, 200, mappedUser)
+
+	accessToken, err := auth.MakeJWT(
+	user.ID,
+	cfg.jwtSecret,
+	expirationTime,
+	)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, fmt.Sprintf("couldn't create access Token: %v", err))
+		return
+	}
+	
+	respondWithJSON(w, http.StatusOK, response{
+		User: User{
+			ID: user.ID,
+			CreatedAt: user.CreatedAt,
+			UpdatedAt: user.UpdatedAt,
+			Email: user.Email,
+		},
+		Token: accessToken,
+	})
 }
 
 func (cfg *apiConfig) handlerGetChirpByID(w  http.ResponseWriter, r *http.Request) {
@@ -170,14 +195,25 @@ func (cfg *apiConfig) handlerGetChirps(w  http.ResponseWriter, r *http.Request) 
 }
 
 func (cfg *apiConfig) handlerCreateChirp(w  http.ResponseWriter, r *http.Request) {
-	// Decode json logic
 	type parameters struct {
 		Body string `json:"body"`
-		UserID uuid.UUID `json:"user_id"`
 	}
+
+	// JWT fetch and validate
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, fmt.Sprintf("Couldn't find token: %v", err))
+		return
+	}
+	userID, err := auth.ValidateJWT(token, cfg.jwtSecret)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, fmt.Sprintf("Couldn't validate token: %v", err))
+		return
+	}
+
 	decoder := json.NewDecoder(r.Body)
 	params := parameters{}
-	err := decoder.Decode(&params)
+	err = decoder.Decode(&params)
 	if err != nil {
 		respondWithError(w, 400, fmt.Sprintf("Error decoding parameters %s", err))
 		return
@@ -189,7 +225,10 @@ func (cfg *apiConfig) handlerCreateChirp(w  http.ResponseWriter, r *http.Request
 	}
 	// check and replace profanity
 	cleanBody := removeProfanity(params.Body)
-	chirp, err := cfg.DB.CreateChirp(r.Context(), database.CreateChirpParams{Body: cleanBody, UserID: params.UserID})
+	chirp, err := cfg.DB.CreateChirp(r.Context(), database.CreateChirpParams{
+		Body: cleanBody,
+		UserID: userID,
+	})
 	if err != nil {
 		respondWithError(w, 500, fmt.Sprintf("Error creating chirp: %s", err))
 		return
