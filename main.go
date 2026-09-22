@@ -77,6 +77,8 @@ func main() {
 
 	serveMux.Handle("/app/", apiCfg.middlewareMetricsInc(http.StripPrefix("/app/", http.FileServer(http.Dir(filepathRoot)))))
 
+	serveMux.HandleFunc("POST /api/refresh", apiCfg.handlerRefresh)
+	serveMux.HandleFunc("POST /api/revoke", apiCfg.handlerRevoke)
 	serveMux.HandleFunc("GET /api/healthz", handlerReadiness)
 	serveMux.HandleFunc("GET /admin/metrics", apiCfg.handlerMetrics)
 	serveMux.HandleFunc("POST /admin/reset", apiCfg.handlerReset)
@@ -95,11 +97,57 @@ func main() {
 	log.Fatal(s.ListenAndServe())
 }
 
+func (cfg *apiConfig) handlerRevoke(w http.ResponseWriter, r *http.Request) {
+	refreshToken, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("Couldn't find token: %v", err))
+		return
+	}
+
+	err = cfg.DB.RevokeRefreshToken(r.Context(), refreshToken)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, fmt.Sprintf("Couldn't revoke token: %s", err))
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (cfg *apiConfig) handlerRefresh(w http.ResponseWriter, r *http.Request) {
+	type response struct{
+		Token string `json:"token"`
+	}
+	refreshToken, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("Couldn't find token: %v", err))
+		return
+	}
+
+	user, err := cfg.DB.GetUserFromRefreshToken(r.Context(), refreshToken)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, fmt.Sprintf("Couldn't find user: %v", err))
+		return
+	}
+
+	accesToken, err := auth.MakeJWT(
+		user.ID,
+		cfg.jwtSecret,
+		time.Hour,
+	)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, fmt.Sprintf("Couldn't validate token: %v", err))
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, response{
+		Token: accesToken,
+	})
+}
+
 func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
 		Password string `json:"password"`
 		Email string `json:"email"`
-		ExpiresInSeconds int `json:"expires_in_seconds"`
 	}
 	type response struct {
 		User
@@ -128,9 +176,6 @@ func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	expirationTime := time.Hour
-	if params.ExpiresInSeconds > 0 && params.ExpiresInSeconds < 3600 {
-		expirationTime = time.Duration(params.ExpiresInSeconds) * time.Second
-	}
 
 	accessToken, err := auth.MakeJWT(
 	user.ID,
@@ -139,6 +184,18 @@ func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 	)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, fmt.Sprintf("couldn't create access Token: %v", err))
+		return
+	}
+
+	refreshToken, err := cfg.DB.CreateRefreshToken(
+		r.Context(),
+		database.CreateRefreshTokenParams{
+			Token: auth.MakeRefreshToken(),
+			UserID: user.ID,
+			ExpiresAt: time.Now().Add(60 * 24 * time.Hour),
+		})
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, fmt.Sprintf("couldn't create refresh Token: %v", err))
 		return
 	}
 	
@@ -150,6 +207,7 @@ func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 			Email: user.Email,
 		},
 		Token: accessToken,
+		RefreshToken: refreshToken.Token,
 	})
 }
 
