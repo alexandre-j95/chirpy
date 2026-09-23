@@ -32,14 +32,16 @@ type User struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	Email     string    `json:"email"`
+	Password string `json:"-"`
+	IsChirpyRed bool `json:"is_chirpy_red"`
 }
 
 type Chirp struct {
-	ID	uuid.UUID	`json:"id"`
-	CreatedAt	time.Time	`json:"created_at"`
-	UpdatedAt	time.Time	`json:"updated_at"`
-	Body	string	`json:"body"`
-	UserID	uuid.UUID	`json:"user_id"`
+	ID uuid.UUID `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Body string `json:"body"`
+	UserID uuid.UUID `json:"user_id"`
 }
 
 func main() {
@@ -91,7 +93,9 @@ func main() {
 	serveMux.HandleFunc("POST /api/chirps", apiCfg.handlerCreateChirp)
 	serveMux.HandleFunc("GET /api/chirps", apiCfg.handlerGetChirps)
 	serveMux.HandleFunc("GET /api/chirps/{chirpID}", apiCfg.handlerGetChirpByID)
+	serveMux.HandleFunc("DELETE /api/chirps/{chirpID}", apiCfg.handlerDeleteChirp)
 	
+	serveMux.HandleFunc("POST /api/polka/webhooks", apiCfg.handlerWebHook)
 
 	s := &http.Server{
 		Handler: serveMux,
@@ -210,6 +214,7 @@ func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 			CreatedAt: user.CreatedAt,
 			UpdatedAt: user.UpdatedAt,
 			Email: user.Email,
+			IsChirpyRed: user.IsChirpyRed,
 		},
 		Token: accessToken,
 		RefreshToken: refreshToken.Token,
@@ -337,6 +342,7 @@ func (cfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Request){
 		CreatedAt: user.CreatedAt,
 		UpdatedAt: user.UpdatedAt,
 		Email: user.Email,
+		IsChirpyRed: user.IsChirpyRed,
 	}
 	respondWithJSON(w, 201, mappedUser)
 }
