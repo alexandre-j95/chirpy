@@ -25,6 +25,7 @@ type apiConfig struct {
 	DB *database.Queries
 	Platform string
 	jwtSecret string
+	polkaKey string
 }
 
 type User struct {
@@ -63,7 +64,12 @@ func main() {
 
 	jwtSecret := os.Getenv("JWTSECRET")
 	if jwtSecret == "" {
-		log.Fatal("JWT Secret is not set")
+		log.Fatal("JWT Secret must be set")
+	}
+
+	polkaKey := os.Getenv("POLKA_KEY")
+	if polkaKey == "" {
+		log.Fatal("Polka Key must be set")
 	}
 
 	const filepathRoot = "."
@@ -74,6 +80,7 @@ func main() {
 		DB: dbQueries,
 		Platform: platform,
 		jwtSecret: jwtSecret,
+		polkaKey: polkaKey,
 	}
 	serveMux := http.NewServeMux()
 
