@@ -80,13 +80,18 @@ func main() {
 	serveMux.HandleFunc("POST /api/refresh", apiCfg.handlerRefresh)
 	serveMux.HandleFunc("POST /api/revoke", apiCfg.handlerRevoke)
 	serveMux.HandleFunc("GET /api/healthz", handlerReadiness)
+	serveMux.HandleFunc("POST /api/login", apiCfg.handlerLogin)
+	
 	serveMux.HandleFunc("GET /admin/metrics", apiCfg.handlerMetrics)
 	serveMux.HandleFunc("POST /admin/reset", apiCfg.handlerReset)
+	
 	serveMux.HandleFunc("POST /api/users", apiCfg.handlerCreateUser)
+	serveMux.HandleFunc("PUT /api/users", apiCfg.handlerUserUpdate)
+
 	serveMux.HandleFunc("POST /api/chirps", apiCfg.handlerCreateChirp)
 	serveMux.HandleFunc("GET /api/chirps", apiCfg.handlerGetChirps)
 	serveMux.HandleFunc("GET /api/chirps/{chirpID}", apiCfg.handlerGetChirpByID)
-	serveMux.HandleFunc("POST /api/login", apiCfg.handlerLogin)
+	
 
 	s := &http.Server{
 		Handler: serveMux,
